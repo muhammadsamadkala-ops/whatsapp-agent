@@ -283,26 +283,36 @@ app.get('/webhook', (req: Request, res: Response) => {
 // WEBHOOK - INCOMING MESSAGES
 // ---------------------------------------------------------------------------
 app.post('/webhook', async (req: Request, res: Response) => {
-  res.sendStatus(200);
-
   try {
     const entry = req.body.entry?.[0];
     const change = entry?.changes?.[0];
     const message = change?.value?.messages?.[0];
 
-    if (!message) return;
+    if (!message) {
+      res.sendStatus(200);
+      return;
+    }
 
     const from = message.from;
     const text = message.text?.body;
 
-    if (!text) return;
+    if (!text) {
+      res.sendStatus(200);
+      return;
+    }
 
     console.log(`Incoming from ${from}: ${text}`);
 
+    // NOTE: On serverless platforms (Vercel), the function is frozen the
+    // moment we send a response - so we must finish all async work (the AI
+    // call + sending the WhatsApp reply) BEFORE responding to Meta here.
     const reply = await runAgent(text, from);
     await sendWhatsAppMessage(from, reply);
+
+    res.sendStatus(200);
   } catch (err) {
     console.error('Error handling webhook:', err);
+    res.sendStatus(200); // Still ack Meta so it doesn't retry endlessly
   }
 });
 
