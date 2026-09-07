@@ -22,7 +22,6 @@ app.use(express.json());
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN!;
 const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID!;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN!;
-// Owner's WhatsApp number - naya order aane par isi number par notification jayegi.
 const OWNER_WHATSAPP_NUMBER = process.env.OWNER_WHATSAPP_NUMBER || '923152292047';
 
 const groqClient = new Groq();
@@ -32,8 +31,6 @@ const BUSINESS_NAME = 'Kevi Belion';
 // ---------------------------------------------------------------------------
 // PRODUCT CATALOG
 // ---------------------------------------------------------------------------
-// Ye aapki apni perfume list hai - isay edit kar ke apne asal products,
-// prices, aur descriptions daal dein. Har product ka structure same rakhein.
 interface Product {
   name: string;
   priceRs: number;
@@ -42,34 +39,14 @@ interface Product {
 }
 
 const PRODUCTS: Product[] = [
-  {
-    name: 'Kevi Noir',
-    priceRs: 3500,
-    description: 'A bold, woody-oud fragrance with hints of amber. Long-lasting, best for evening wear.',
-    inStock: true,
-  },
-  {
-    name: 'Kevi Blanc',
-    priceRs: 2800,
-    description: 'A light, fresh floral scent with notes of jasmine and citrus. Perfect for daily wear.',
-    inStock: true,
-  },
-  {
-    name: 'Kevi Musk Royale',
-    priceRs: 4200,
-    description: 'A rich musk fragrance with a warm, luxurious finish. Our signature best-seller.',
-    inStock: true,
-  },
-  {
-    name: 'Kevi Rose Attar',
-    priceRs: 2200,
-    description: 'A traditional rose-based attar, alcohol-free, ideal for a subtle everyday scent.',
-    inStock: false,
-  },
+  { name: 'Kevi Noir', priceRs: 3500, description: 'A bold, woody-oud fragrance with hints of amber. Long-lasting, best for evening wear.', inStock: true },
+  { name: 'Kevi Blanc', priceRs: 2800, description: 'A light, fresh floral scent with notes of jasmine and citrus. Perfect for daily wear.', inStock: true },
+  { name: 'Kevi Musk Royale', priceRs: 4200, description: 'A rich musk fragrance with a warm, luxurious finish. Our signature best-seller.', inStock: true },
+  { name: 'Kevi Rose Attar', priceRs: 2200, description: 'A traditional rose-based attar, alcohol-free, ideal for a subtle everyday scent.', inStock: false },
 ];
 
 // ---------------------------------------------------------------------------
-// ORDERS (in-memory for now - resets if the server restarts)
+// ORDERS (in-memory - may reset between serverless invocations on Vercel)
 // ---------------------------------------------------------------------------
 interface Order {
   id: number;
@@ -112,8 +89,7 @@ async function webSearch(query: string): Promise<string> {
 
 function listProducts(): string {
   const lines = PRODUCTS.map(
-    (p) =>
-      `• *${p.name}* - Rs. ${p.priceRs}${p.inStock ? '' : ' (currently out of stock)'}\n  ${p.description}`
+    (p) => `• *${p.name}* - Rs. ${p.priceRs}${p.inStock ? '' : ' (currently out of stock)'}\n  ${p.description}`
   );
   return `Here's our current ${BUSINESS_NAME} catalog:\n\n${lines.join('\n\n')}`;
 }
@@ -149,7 +125,6 @@ async function placeOrder(
   };
   ORDERS.push(order);
 
-  // Owner ko turant WhatsApp par notify karein
   const ownerMessage =
     `🛍️ New order at ${BUSINESS_NAME}!\n\n` +
     `Order #${order.id}\n` +
@@ -165,8 +140,7 @@ const AVAILABLE_TOOLS: Record<string, (input: any) => string | Promise<string>> 
   calculator: (input) => calculator(input.expression),
   web_search: (input) => webSearch(input.query),
   list_products: () => listProducts(),
-  place_order: (input) =>
-    placeOrder(input.customerWhatsApp, input.customerName, input.productName, input.quantity),
+  place_order: (input) => placeOrder(input.customerWhatsApp, input.customerName, input.productName, input.quantity),
 };
 
 // ---------------------------------------------------------------------------
@@ -178,11 +152,7 @@ const TOOL_DEFINITIONS: ChatCompletionTool[] = [
     function: {
       name: 'calculator',
       description: 'Evaluates a math expression. Useful for computing totals or discounts.',
-      parameters: {
-        type: 'object',
-        properties: { expression: { type: 'string' } },
-        required: ['expression'],
-      },
+      parameters: { type: 'object', properties: { expression: { type: 'string' } }, required: ['expression'] },
     },
   },
   {
@@ -190,11 +160,7 @@ const TOOL_DEFINITIONS: ChatCompletionTool[] = [
     function: {
       name: 'web_search',
       description: 'Searches the web for a general fact or piece of information not related to our product catalog.',
-      parameters: {
-        type: 'object',
-        properties: { query: { type: 'string' } },
-        required: ['query'],
-      },
+      parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
     },
   },
   {
@@ -365,12 +331,18 @@ app.get('/privacy', (_req: Request, res: Response) => {
   `);
 });
 
-// Simple endpoint to check current orders (useful for the owner)
 app.get('/orders', (_req: Request, res: Response) => {
   res.json(ORDERS);
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`${BUSINESS_NAME} server listening on port ${PORT}`);
-});
+// ---------------------------------------------------------------------------
+// Start server locally, OR export the app for Vercel's serverless runtime
+// ---------------------------------------------------------------------------
+if (process.env.VERCEL !== '1') {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`${BUSINESS_NAME} server listening on port ${PORT}`);
+  });
+}
+
+export default app;
