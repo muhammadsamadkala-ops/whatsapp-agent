@@ -62,6 +62,17 @@ const ORDERS: Order[] = [];
 let nextOrderId = 1;
 
 // ---------------------------------------------------------------------------
+// CONVERSATION MEMORY (per customer, in-memory)
+// ---------------------------------------------------------------------------
+// Har customer ke WhatsApp number ke liye pichli baaton ka record rakhte hain,
+// taake AI ko yaad rahe (jaise "Kevi Musk Royale, 2 bottles, naam Ali").
+// NOTE: Ye memory serverless instance ke saath reset ho sakti hai agar Vercel
+// naya cold instance spin kare - lambe term ke liye ek real database
+// (jaise Postgres/Redis) behtar rahega, lekin testing ke liye ye kaafi hai.
+const conversationHistory = new Map<string, ChatCompletionMessageParam[]>();
+const MAX_HISTORY_MESSAGES = 20; // purani history zyada bhari na ho, isliye trim karte hain
+
+// ---------------------------------------------------------------------------
 // TOOL FUNCTIONS
 // ---------------------------------------------------------------------------
 function calculator(expression: string): string {
@@ -194,18 +205,23 @@ const TOOL_DEFINITIONS: ChatCompletionTool[] = [
 // AGENT LOOP
 // ---------------------------------------------------------------------------
 async function runAgent(userMessage: string, customerWhatsApp: string): Promise<string> {
-  const messages: ChatCompletionMessageParam[] = [
-    {
-      role: 'system',
-      content:
-        `You are the friendly WhatsApp assistant for "${BUSINESS_NAME}", a perfume shop. ` +
-        `Help customers browse the catalog and place orders. Keep replies short and warm, ` +
-        `suitable for a chat app. When placing an order, always pass the customer's WhatsApp ` +
-        `number as "${customerWhatsApp}" - never ask the customer for it. Always confirm the ` +
-        `product name and quantity with the customer before calling place_order.`,
-    },
-    { role: 'user', content: userMessage },
-  ];
+  // Purani history uthayein (ya nayi shuru karein agar pehli baar hai)
+  let history = conversationHistory.get(customerWhatsApp);
+  if (!history) {
+    history = [
+      {
+        role: 'system',
+        content:
+          `You are the friendly WhatsApp assistant for "${BUSINESS_NAME}", a perfume shop. ` +
+          `Help customers browse the catalog and place orders. Keep replies short and warm, ` +
+          `suitable for a chat app. When placing an order, always pass the customer's WhatsApp ` +
+          `number as "${customerWhatsApp}" - never ask the customer for it. Always confirm the ` +
+          `product name and quantity with the customer before calling place_order.`,
+      },
+    ];
+  }
+
+  const messages: ChatCompletionMessageParam[] = [...history, { role: 'user', content: userMessage }];
 
   while (true) {
     const response = await groqClient.chat.completions.create({
@@ -220,6 +236,12 @@ async function runAgent(userMessage: string, customerWhatsApp: string): Promise<
 
     const toolCalls = choice.tool_calls;
     if (!toolCalls || toolCalls.length === 0) {
+      // Naya jawab final hai - is customer ki history save/update kar dein
+      const trimmed =
+        messages.length > MAX_HISTORY_MESSAGES
+          ? [messages[0], ...messages.slice(-(MAX_HISTORY_MESSAGES - 1))]
+          : messages;
+      conversationHistory.set(customerWhatsApp, trimmed);
       return choice.content ?? "Sorry, I couldn't come up with a reply.";
     }
 
