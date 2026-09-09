@@ -297,6 +297,50 @@ async function sendWhatsAppMessage(to: string, text: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// SEND A CLICKABLE CATALOG (WhatsApp native "list message")
+// ---------------------------------------------------------------------------
+function truncate(text: string, max: number): string {
+  return text.length > max ? text.slice(0, max - 1) + '…' : text;
+}
+
+async function sendCatalogList(to: string): Promise<void> {
+  const url = `https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
+
+  const rows = PRODUCTS.filter((p) => p.inStock).map((p) => ({
+    id: p.name,
+    title: truncate(p.name, 24),
+    description: truncate(`Rs. ${p.priceRs} - ${p.description}`, 72),
+  }));
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        header: { type: 'text', text: `${BUSINESS_NAME} 🌸` },
+        body: { text: 'Welcome! Tap below to see our perfumes and select one to order.' },
+        footer: { text: 'You can also just type your question.' },
+        action: {
+          button: 'View Perfumes',
+          sections: [{ title: 'Our Perfumes', rows }],
+        },
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    console.error('Failed to send catalog list:', await res.text());
+  }
+}
+
+// ---------------------------------------------------------------------------
 // WEBHOOK VERIFICATION
 // ---------------------------------------------------------------------------
 app.get('/webhook', (req: Request, res: Response) => {
@@ -327,19 +371,42 @@ app.post('/webhook', async (req: Request, res: Response) => {
     }
 
     const from = message.from;
-    const text = message.text?.body;
 
-    if (!text) {
+    // Two kinds of incoming messages we handle:
+    // 1. Plain text
+    // 2. A tap on one of our catalog list rows (interactive list_reply)
+    let userText: string | null = null;
+    let isGreeting = false;
+
+    if (message.type === 'text') {
+      userText = message.text?.body ?? null;
+      const normalized = userText?.trim().toLowerCase() ?? '';
+      const greetings = ['hi', 'hello', 'hey', 'hii', 'hlo', 'salam', 'assalam', 'assalamualaikum', 'menu', 'start'];
+      isGreeting = greetings.includes(normalized);
+    } else if (message.type === 'interactive' && message.interactive?.type === 'list_reply') {
+      // Customer tapped a product from the catalog list
+      const selectedProduct = message.interactive.list_reply.title;
+      userText = `I'd like to order ${selectedProduct}`;
+    }
+
+    if (!userText) {
       res.sendStatus(200);
       return;
     }
 
-    console.log(`Incoming from ${from}: ${text}`);
+    console.log(`Incoming from ${from}: ${userText}`);
+
+    if (isGreeting) {
+      // Show the clickable catalog directly instead of routing through the AI
+      await sendCatalogList(from);
+      res.sendStatus(200);
+      return;
+    }
 
     // NOTE: On serverless platforms (Vercel), the function is frozen the
     // moment we send a response - so we must finish all async work (the AI
     // call + sending the WhatsApp reply) BEFORE responding to Meta here.
-    const reply = await runAgent(text, from);
+    const reply = await runAgent(userText, from);
     await sendWhatsAppMessage(from, reply);
 
     res.sendStatus(200);
