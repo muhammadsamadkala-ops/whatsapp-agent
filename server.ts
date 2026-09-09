@@ -55,6 +55,7 @@ interface Order {
   productName: string;
   quantity: number;
   totalRs: number;
+  deliveryAddress: string;
   createdAt: string;
 }
 
@@ -109,7 +110,8 @@ async function placeOrder(
   customerWhatsApp: string,
   customerName: string,
   productName: string,
-  quantity: number
+  quantity: number,
+  deliveryAddress: string
 ): Promise<string> {
   const product = PRODUCTS.find((p) => p.name.toLowerCase() === productName.toLowerCase());
 
@@ -123,6 +125,9 @@ async function placeOrder(
   if (quantity < 1) {
     return `Please specify a valid quantity (1 or more).`;
   }
+  if (!deliveryAddress || deliveryAddress.trim().length < 5) {
+    return `Please provide a valid delivery address before we can place the order.`;
+  }
 
   const total = product.priceRs * quantity;
   const order: Order = {
@@ -132,6 +137,7 @@ async function placeOrder(
     productName: product.name,
     quantity,
     totalRs: total,
+    deliveryAddress,
     createdAt: new Date().toISOString(),
   };
   ORDERS.push(order);
@@ -141,17 +147,18 @@ async function placeOrder(
     `Order #${order.id}\n` +
     `Customer: ${customerName} (${customerWhatsApp})\n` +
     `Product: ${product.name} x${quantity}\n` +
-    `Total: Rs. ${total}`;
+    `Total: Rs. ${total}\n` +
+    `Delivery Address: ${deliveryAddress}`;
   await sendWhatsAppMessage(OWNER_WHATSAPP_NUMBER, ownerMessage);
 
-  return `Order confirmed! ✅\n\nOrder #${order.id}\n${product.name} x${quantity}\nTotal: Rs. ${total}\n\nWe'll be in touch shortly to confirm delivery details. Thank you for shopping with ${BUSINESS_NAME}!`;
+  return `Order confirmed! ✅\n\nOrder #${order.id}\n${product.name} x${quantity}\nTotal: Rs. ${total}\nDelivering to: ${deliveryAddress}\n\nThank you for shopping with ${BUSINESS_NAME}!`;
 }
 
 const AVAILABLE_TOOLS: Record<string, (input: any) => string | Promise<string>> = {
   calculator: (input) => calculator(input.expression),
   web_search: (input) => webSearch(input.query),
   list_products: () => listProducts(),
-  place_order: (input) => placeOrder(input.customerWhatsApp, input.customerName, input.productName, input.quantity),
+  place_order: (input) => placeOrder(input.customerWhatsApp, input.customerName, input.productName, input.quantity, input.deliveryAddress),
 };
 
 // ---------------------------------------------------------------------------
@@ -186,7 +193,7 @@ const TOOL_DEFINITIONS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'place_order',
-      description: 'Places an order for a customer. Only call this once the customer has confirmed the exact product name, quantity, and given their name.',
+      description: 'Places an order for a customer. Only call this once the customer has confirmed the exact product name, quantity, given their name, AND provided a delivery address.',
       parameters: {
         type: 'object',
         properties: {
@@ -194,8 +201,9 @@ const TOOL_DEFINITIONS: ChatCompletionTool[] = [
           customerName: { type: 'string', description: "The customer's name" },
           productName: { type: 'string', description: 'The exact product name from the catalog' },
           quantity: { type: 'number', description: 'How many units to order' },
+          deliveryAddress: { type: 'string', description: 'The full delivery address (street, area, city)' },
         },
-        required: ['customerWhatsApp', 'customerName', 'productName', 'quantity'],
+        required: ['customerWhatsApp', 'customerName', 'productName', 'quantity', 'deliveryAddress'],
       },
     },
   },
@@ -215,8 +223,11 @@ async function runAgent(userMessage: string, customerWhatsApp: string): Promise<
           `You are the friendly WhatsApp assistant for "${BUSINESS_NAME}", a perfume shop. ` +
           `Help customers browse the catalog and place orders. Keep replies short and warm, ` +
           `suitable for a chat app. When placing an order, always pass the customer's WhatsApp ` +
-          `number as "${customerWhatsApp}" - never ask the customer for it. Always confirm the ` +
-          `product name and quantity with the customer before calling place_order.`,
+          `number as "${customerWhatsApp}" - never ask the customer for it. Before calling ` +
+          `place_order, make sure you have confirmed with the customer: the exact product name, ` +
+          `the quantity, their name, AND their delivery address. Ask for the delivery address if ` +
+          `it hasn't been given yet. Once place_order succeeds, do not ask any further questions - ` +
+          `just confirm the order details back to the customer.`,
       },
     ];
   }
